@@ -1,0 +1,172 @@
+#!/usr/bin/perl
+# ex:ts=4:
+# Licensed under GPL v2
+# Copyright: 2013 Jerry Swann
+
+use Getopt::Long;
+use File::Temp;
+use Pod::Usage;
+
+@clobber_regexes=();
+%opts=();
+GetOptions(\%opts,'debug',
+	'string=s@',
+	'clobber=s'=>\&clobber_handler,
+	'addline=s@'=>\$opt_addline,
+	'min=s'=>\&schedule_handler,
+	'hour=s'=>\&schedule_handler,
+	'dayofmonth=s'=>\&schedule_handler,
+	'dayofweek=s'=>\&schedule_handler,
+	'month=s'=>\&schedule_handler,
+	'command=s',
+	'help|?',
+	'man',
+) or pod2usage(2);
+
+use Data::Dumper; print Dumper(\%opts);exit 0;
+
+pod2usage(1) if $opts{help};
+pod2usage(-verbose=>2) if $opts{man};
+
+#pod2usage("$0: No files given.") if ((@ARGV==0) && (-t STDIN));
+main();
+
+# subs
+
+sub clobber_handler {
+	my $name=shift;
+	my $value=shift;
+	print "name=$name,value=$value\n" if $opts{debug};
+	push(@clobber_regexes,qr($value));
+}
+
+sub schedule_handler {
+	my $name=shift;
+	my $value=shift;
+	if ($value=~/rand\(\s*(\d+)\s*\)/) {
+		$value=int(rand($1));
+	}
+	elsif ($value=~/rand\(([^\)]+)\)/) {
+		my $inner=$1;
+		$inner=~s/[,\s]+/,/g;
+		$inner=~s/(\d+)-(\d+)/join(',',$1..$2)/eg;
+		my @nums=split(/\,/,$inner);
+		$value=$nums[int(rand(@nums+1))];
+	}
+	print "name=$name,value=$value\n" if $opts{debug};
+	$opts{$name}=$value;
+}
+
+sub run_cmd {
+	my $cmd=join(' ',@_);
+	my $out=[];
+	print "cmd=$cmd\n" if $opts{debug};
+	open(CMD,"$cmd 2>&1|");
+	while (<CMD>) {
+		push(@{$out},$_);
+	}
+	close CMD;
+	$out;
+}
+
+sub main {
+	my $output=run_cmd('/usr/bin/crontab','-l');
+	# $output is referencing an array of the lines in the crontab -l cmd
+	my $changed=0;
+	if (@clobber_regexes+0) {
+		my $lineno=0;
+		my $offset=0;
+		my @del_lines=();
+		foreach my $line (@{$output}) {
+			$lineno++;
+			print "$lineno:$line" if $opts{debug};
+			foreach my $re (@clobber_regexes) {
+				print "re=$re\n" if $opts{debug};
+				if ($line=~/$re/s) {
+					print "clobber line #",$lineno,"\n" if $opts{debug};
+					$offset++;
+					push(@del_lines,$lineno-$offset);
+					break;
+				}
+			}
+		}
+		foreach my $l (@del_lines) {
+			splice(@{$output},$l,1);
+			$changed=1;
+		}
+		print join('',@{$output});
+	}
+	if ($opts{command}) {
+		$opt_addline=[] if !$opt_addline;
+		my $t=join(' ',
+			$opts{min} ? $opts{min} : '*',
+			$opts{hour} ? $opts{hour} : '*',
+			$opts{dayofmonth} ? $opts{dayofmonth} : '*',
+			$opts{month} ? $opts{month} : '*',
+			$opts{dayofweek} ? $opts{dayofweek} : '*',
+			$opts{command}
+		);
+		print "t=$t\n" if $opts{debug};
+		push(@{$opt_addline},$t);
+	}
+	$outtxt=join('',@{$output});
+	if ($opt_addline) {
+		print "opt_addline=$opt_addline\n" if $opts{debug};
+		foreach my $addline (@{$opt_addline}) {
+		print "addline=$addline\n" if $opts{debug};
+			if ($outtxt=~/^\Q$addline\E$/m) {
+				print "$addline found,ignoring\n";
+			}
+			else {
+				$outtxt.="$addline\n";
+				$changed=1;
+			}
+		}
+	}
+	write_crontab($outtxt) if $changed;
+}
+
+sub write_crontab {
+	my $output=shift;
+	my ($fh,$filename)=File::Temp::tempfile(DIR=>'/tmp');
+	print $fh $output;
+	close $fh;
+	run_cmd('/usr/bin/crontab',$filename);
+	unlink($filename);
+}
+
+
+__END__
+
+=head1 NAME
+
+sample - Using GetOpt::Long and Pod::Usage
+
+=head1 SYNOPSIS
+
+sample [options] [file ...]
+
+ Options:
+   -help            brief help message
+   -man             full documentation
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-help>
+
+Print a brief help message and exits.
+
+=item B<-man>
+
+Prints the manual page and exits.
+
+=back
+
+=head1 DESCRIPTION
+
+B<This program> will read the given input file(s) and do something
+useful with the contents thereof.
+
+=cut
