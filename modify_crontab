@@ -7,7 +7,7 @@ use Getopt::Long;
 use File::Temp;
 use Pod::Usage;
 
-@clobber_regexes=();
+@{$opts{clobber}}=();
 %opts=();
 GetOptions(\%opts,'debug',
 	'clobber=s@',
@@ -18,11 +18,12 @@ GetOptions(\%opts,'debug',
 	'dayofweek=s',
 	'month=s',
 	'command=s',
+	'user=s',
 	'help|?',
 	'man',
 ) or pod2usage(2);
 
-use Data::Dumper; print Dumper(\%opts);exit 0;
+#use Data::Dumper; print Dumper(\%opts);exit 0;
 
 pod2usage(1) if $opts{help};
 pod2usage(-verbose=>2) if $opts{man};
@@ -32,11 +33,10 @@ main();
 
 # subs
 
-sub clobber_handler {
-	my $name=shift;
-	my $value=shift;
-	print "name=$name,value=$value\n" if $opts{debug};
-	push(@clobber_regexes,qr($value));
+sub handle_clobber {
+	foreach my $re (@{$opts{clobber}}) {
+		push(@{$opts{clobber_re}},qr($re));
+	}
 }
 
 sub handle_schedule {
@@ -80,14 +80,15 @@ sub main {
 	# $output is referencing an array of the lines in the crontab -l cmd
 	my $changed=0;
 	handle_schedule();
-	if (@clobber_regexes+0) {
+	handle_clobber();
+	if (@{$opts{clobber_re}}+0) {
 		my $lineno=0;
 		my $offset=0;
 		my @del_lines=();
 		foreach my $line (@{$output}) {
 			$lineno++;
 			print "$lineno:$line" if $opts{debug};
-			foreach my $re (@clobber_regexes) {
+			foreach my $re (@{$opts{clobber_re}}) {
 				print "re=$re\n" if $opts{debug};
 				if ($line=~/$re/s) {
 					print "clobber line #",$lineno,"\n" if $opts{debug};
@@ -101,20 +102,20 @@ sub main {
 			splice(@{$output},$l,1);
 			$changed=1;
 		}
-		print join('',@{$output});
+		print join('',@{$output}) if $opts{debug};;
 	}
 	if ($opts{command}) {
-		$opt_addline=[] if !$opt_addline;
+		$opts{addline}=[] if !$opts{addline};
 		my $t=join(' ', $opts{min}, $opts{hour}, $opts{dayofmonth},
 			$opts{month}, $opts{dayofweek}, $opts{command}
 		);
 		print "t=$t\n" if $opts{debug};
-		push(@{$opt_addline},$t);
+		push(@{$opts{addline}},$t);
 	}
 	$outtxt=join('',@{$output});
-	if ($opt_addline) {
-		print "opt_addline=$opt_addline\n" if $opts{debug};
-		foreach my $addline (@{$opt_addline}) {
+	if ($opts{addline}) {
+		print "opt_addline=$opts{addline}\n" if $opts{debug};
+		foreach my $addline (@{$opts{addline}}) {
 		print "addline=$addline\n" if $opts{debug};
 			if ($outtxt=~/^\Q$addline\E$/m) {
 				print "$addline found,ignoring\n";
