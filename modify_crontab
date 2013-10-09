@@ -10,14 +10,13 @@ use Pod::Usage;
 @clobber_regexes=();
 %opts=();
 GetOptions(\%opts,'debug',
-	'string=s@',
-	'clobber=s'=>\&clobber_handler,
-	'addline=s@'=>\$opt_addline,
-	'min=s'=>\&schedule_handler,
-	'hour=s'=>\&schedule_handler,
-	'dayofmonth=s'=>\&schedule_handler,
-	'dayofweek=s'=>\&schedule_handler,
-	'month=s'=>\&schedule_handler,
+	'clobber=s@',
+	'addline=s@',
+	'min=s',
+	'hour=s',
+	'dayofmonth=s',
+	'dayofweek=s',
+	'month=s',
 	'command=s',
 	'help|?',
 	'man',
@@ -40,21 +39,28 @@ sub clobber_handler {
 	push(@clobber_regexes,qr($value));
 }
 
-sub schedule_handler {
-	my $name=shift;
-	my $value=shift;
-	if ($value=~/rand\(\s*(\d+)\s*\)/) {
-		$value=int(rand($1));
+sub handle_schedule {
+	foreach my $name (qw(min hour month dayofweek dayofmonth)) {
+		my $value=$opts{$name};
+		if (!$value) {
+			$value='*';
+		}
+		elsif ($value=~/rand\(\s*(\d+)\s*\)/) {
+			$value=int(rand($1));
+		}
+		elsif ($value=~/rand\(([^\)]+)\)/) {
+			my $inner=$1;
+			$inner=~s/[,\s]+/,/g;
+			$inner=~s/(\d+)-(\d+)/join(',',$1..$2)/eg;
+			my @nums=split(/\,/,$inner);
+			$value=$nums[int(rand(@nums+1))];
+		}
+		else {
+			next;
+		}
+		print "name=$name,value=$value\n" if $opts{debug};
+		$opts{$name}=$value;
 	}
-	elsif ($value=~/rand\(([^\)]+)\)/) {
-		my $inner=$1;
-		$inner=~s/[,\s]+/,/g;
-		$inner=~s/(\d+)-(\d+)/join(',',$1..$2)/eg;
-		my @nums=split(/\,/,$inner);
-		$value=$nums[int(rand(@nums+1))];
-	}
-	print "name=$name,value=$value\n" if $opts{debug};
-	$opts{$name}=$value;
 }
 
 sub run_cmd {
@@ -73,6 +79,7 @@ sub main {
 	my $output=run_cmd('/usr/bin/crontab','-l');
 	# $output is referencing an array of the lines in the crontab -l cmd
 	my $changed=0;
+	handle_schedule();
 	if (@clobber_regexes+0) {
 		my $lineno=0;
 		my $offset=0;
@@ -98,13 +105,8 @@ sub main {
 	}
 	if ($opts{command}) {
 		$opt_addline=[] if !$opt_addline;
-		my $t=join(' ',
-			$opts{min} ? $opts{min} : '*',
-			$opts{hour} ? $opts{hour} : '*',
-			$opts{dayofmonth} ? $opts{dayofmonth} : '*',
-			$opts{month} ? $opts{month} : '*',
-			$opts{dayofweek} ? $opts{dayofweek} : '*',
-			$opts{command}
+		my $t=join(' ', $opts{min}, $opts{hour}, $opts{dayofmonth},
+			$opts{month}, $opts{dayofweek}, $opts{command}
 		);
 		print "t=$t\n" if $opts{debug};
 		push(@{$opt_addline},$t);
