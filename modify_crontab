@@ -75,12 +75,20 @@ sub run_cmd {
 	$out;
 }
 
+sub handle_output {
+    my $output=shift;
+    if ($$output[0]=~/crontab: no crontab for/) {
+        @{$output}=();
+    }
+}
+
 sub main {
 	my $output=run_cmd('/usr/bin/crontab','-l');
 	# $output is referencing an array of the lines in the crontab -l cmd
 	my $changed=0;
 	handle_schedule();
 	handle_clobber();
+        handle_output($output);
 	if (@{$opts{clobber_re}}+0) {
 		my $lineno=0;
 		my $offset=0;
